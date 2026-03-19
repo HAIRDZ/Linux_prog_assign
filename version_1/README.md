@@ -31,12 +31,20 @@ Các giá trị X được khảo sát:
 
 ---
 
-## 4. Kết quả
+## 4. Phân tích kết quả
 
-- Khi X lớn: interval ổn định, sai số nhỏ  
-- Khi X giảm: xuất hiện jitter  
-- Khi X rất nhỏ: hệ thống mất ổn định  
-- Có spike do hiện tượng deadline miss  
+Dưới đây là bản **nhận xét đúng kiểu kỹ thuật, tập trung vào code và thuật toán**:
+
+---
+
+Chương trình được thiết kế với ba thread hoạt động song song: SAMPLE, INPUT và LOGGING. Thread SAMPLE sử dụng `clock_nanosleep()` với chế độ `TIMER_ABSTIME` trên `CLOCK_MONOTONIC`, cho phép lập lịch theo thời gian tuyệt đối. Cách này giúp hạn chế sai số tích lũy (drift) so với việc sleep tương đối, vì mỗi chu kỳ luôn được tính dựa trên mốc thời gian kế tiếp (`nextTime`) thay vì thời điểm hiện tại.
+
+Trong mỗi vòng lặp, thread SAMPLE tăng `nextTime` thêm `periodNs`, chuẩn hóa lại `tv_nsec`, sau đó sleep đến đúng mốc thời gian này. Sau khi thức dậy, thời gian hiện tại được lấy bằng `clock_gettime(CLOCK_REALTIME)` và ghi vào biến dùng chung. Thread LOGGING chờ tín hiệu từ SAMPLE thông qua `pthread_cond_wait`, sau đó tính interval bằng hiệu giữa hai lần timestamp liên tiếp và ghi ra file. Cách sử dụng mutex và condition variable đảm bảo dữ liệu không bị race condition và tránh polling không cần thiết.
+
+Thread INPUT định kỳ đọc file `freq.txt` để cập nhật lại `periodNs`. Việc cập nhật này có khóa mutex, nhưng không đồng bộ với biến `nextTime` trong SAMPLE. Khi `periodNs` thay đổi, `nextTime` vẫn tiếp tục cộng dồn theo giá trị cũ rồi mới chuyển sang giá trị mới, dẫn đến một số khoảng interval bất thường tại thời điểm chuyển pha.
+
+Kết quả đo cho thấy với chu kỳ lớn (ví dụ 1e6 ns), interval dao động nhỏ quanh giá trị đặt, chứng tỏ cơ chế sleep tuyệt đối hoạt động ổn định. Khi giảm chu kỳ xuống các mức nhỏ hơn, độ dao động tăng lên và xuất hiện nhiều giá trị lệch lớn. Nguyên nhân chính là chi phí lập lịch của hệ điều hành, độ trễ context switch và thời gian xử lý trong user-space lớn hơn hoặc cùng bậc với chu kỳ yêu cầu. Với các giá trị rất nhỏ như 1000 ns hoặc 100 ns trong mỗi vòng lặp, thread SAMPLE không chỉ thực hiện sleep mà còn phải trải qua nhiều bước như chuyển trạng thái từ sleep sang running, thực hiện context switch, gọi clock_gettime, thao tác với mutex và gửi tín hiệu condition variable. Tổng thời gian cho các thao tác này thường nằm ở mức vài microsecond hoặc lớn hơn, vượt xa giá trị chu kỳ yêu cầu => dẫn đến interval phân tán rộng.
+
 
 ---
 

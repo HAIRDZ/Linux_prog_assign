@@ -33,17 +33,12 @@ Các giá trị X được khảo sát:
 
 ## 4. Phân tích kết quả
 
-Dưới đây là bản **nhận xét đúng kiểu kỹ thuật, tập trung vào code và thuật toán**:
+Chương trình sử dụng thread SAMPLE với cơ chế sleep theo thời gian tuyệt đối (clock_nanosleep với TIMER_ABSTIME), trong đó nextTime được cộng dồn theo periodNs để bám theo timeline lý tưởng. Cách này giúp tránh sai số tích lũy và đảm bảo về mặt thuật toán rằng chu kỳ thực thi luôn hướng tới giá trị X mong muốn. Dữ liệu được đồng bộ qua mutex và condition variable, sau đó thread LOGGING tính interval bằng hiệu giữa hai timestamp liên tiếp.
 
----
+Kết quả đo cho thấy khi chu kỳ X lớn (1000000 ns, 100000 ns), giá trị interval trung bình bám sát giá trị đặt và độ dao động nhỏ. Tuy nhiên, khi X giảm xuống 10000 ns, 1000 ns và 100 ns, giá trị trung bình bắt đầu lệch khỏi X và hội tụ về khoảng ~10000 ns, đồng thời xuất hiện nhiều spike lớn.
+Nguyên nhân là do tổng chi phí thực thi của hệ thống (context switch, scheduler, system call, đồng bộ mutex và I/O) lớn hơn chu kỳ yêu cầu. 
 
-Chương trình được thiết kế với ba thread hoạt động song song: SAMPLE, INPUT và LOGGING. Thread SAMPLE sử dụng `clock_nanosleep()` với chế độ `TIMER_ABSTIME` trên `CLOCK_MONOTONIC`, cho phép lập lịch theo thời gian tuyệt đối. Cách này giúp hạn chế sai số tích lũy (drift) so với việc sleep tương đối, vì mỗi chu kỳ luôn được tính dựa trên mốc thời gian kế tiếp (`nextTime`) thay vì thời điểm hiện tại.
-
-Trong mỗi vòng lặp, thread SAMPLE tăng `nextTime` thêm `periodNs`, chuẩn hóa lại `tv_nsec`, sau đó sleep đến đúng mốc thời gian này. Sau khi thức dậy, thời gian hiện tại được lấy bằng `clock_gettime(CLOCK_REALTIME)` và ghi vào biến dùng chung. Thread LOGGING chờ tín hiệu từ SAMPLE thông qua `pthread_cond_wait`, sau đó tính interval bằng hiệu giữa hai lần timestamp liên tiếp và ghi ra file. Cách sử dụng mutex và condition variable đảm bảo dữ liệu không bị race condition và tránh polling không cần thiết.
-
-Thread INPUT định kỳ đọc file `freq.txt` để cập nhật lại `periodNs`. Việc cập nhật này có khóa mutex, nhưng không đồng bộ với biến `nextTime` trong SAMPLE. Khi `periodNs` thay đổi, `nextTime` vẫn tiếp tục cộng dồn theo giá trị cũ rồi mới chuyển sang giá trị mới, dẫn đến một số khoảng interval bất thường tại thời điểm chuyển pha.
-
-Kết quả đo cho thấy với chu kỳ lớn (ví dụ 1e6 ns), interval dao động nhỏ quanh giá trị đặt, chứng tỏ cơ chế sleep tuyệt đối hoạt động ổn định. Khi giảm chu kỳ xuống các mức nhỏ hơn, độ dao động tăng lên và xuất hiện nhiều giá trị lệch lớn. Nguyên nhân chính là chi phí lập lịch của hệ điều hành, độ trễ context switch và thời gian xử lý trong user-space lớn hơn hoặc cùng bậc với chu kỳ yêu cầu. Với các giá trị rất nhỏ như 1000 ns hoặc 100 ns trong mỗi vòng lặp, thread SAMPLE không chỉ thực hiện sleep mà còn phải trải qua nhiều bước như chuyển trạng thái từ sleep sang running, thực hiện context switch, gọi clock_gettime, thao tác với mutex và gửi tín hiệu condition variable. Tổng thời gian cho các thao tác này thường nằm ở mức vài microsecond hoặc lớn hơn, vượt xa giá trị chu kỳ yêu cầu => dẫn đến interval phân tán rộng.
+Khi nextTime đến, thread không được chạy ngay mà bị trễ, khiến interval thực tế bị kéo dài. Khi X nhỏ hơn độ trễ tối thiểu của hệ thống, interval không còn phụ thuộc vào X mà bị giới hạn bởi độ trễ này, dẫn đến giá trị trung bình bị lệch và phân bố rộng.
 
 
 ---

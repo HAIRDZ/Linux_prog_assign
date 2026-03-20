@@ -40,6 +40,7 @@ Nguyên nhân là do tổng chi phí thực thi của hệ thống (context swit
 
 Khi nextTime đến, thread không được chạy ngay mà bị trễ, khiến interval thực tế bị kéo dài. Khi X nhỏ hơn độ trễ tối thiểu của hệ thống, interval không còn phụ thuộc vào X mà bị giới hạn bởi độ trễ này, dẫn đến giá trị trung bình bị lệch và phân bố rộng.
 
+=> hướng giải quyết : có thể cải thiện bằng cách giảm overhead (hạn chế ghi file, tối ưu đồng bộ), gán CPU affinity và sử dụng lập lịch real-time (SCHED_FIFO)
 
 ---
 
